@@ -1,0 +1,150 @@
+# Output intended for import into a PBS spreadsheet, to facilitate faster
+#  creation and update the PBS spreadsheet than could be done by hand
+#  inspection of the CAD model on each update of the CAD model.
+#
+# Input: FreeCAD model (possibly imported STEP model)
+# Output: CSV containing Product Breakdown Structure (PBS) hierarchy,
+#					quantity, CAD IDs
+#
+# TODO: Output part color to distinquish part types.
+#
+# Maintained here: https://github.com/AndrewSmart/ProductBreakdownStructure
+#
+# Copyright © 2018 Andrew Smart
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+import Part
+
+# Must preprocess the hierarchy into a custom tree
+# Necessary in order to get proper assembly names, and proper quantities.
+class Node:
+	def __init__(self, id, name, parent, assem):
+		self.id = id
+		self.name = name
+		self.parent = parent
+		self.assem = assem
+		self.children = []
+		self.quantity = 1
+
+# Returns a list [CAD_ID(str), Name(str)] from the input assembly/part label
+# e.g. "KP0080-01_ToolShaft16iDB002" => ["KP0080","ToolShaft16iDB002"]
+def get_CADID_Name(assem, label):
+	#label = label.replace("__1_","")
+	label = label.replace("-01_","_01_")
+	ret = label.split("_01_")
+	#print("  Label:" + label)
+	if len(ret) == 1 and hasattr(assem, 'Group'):
+		#See if child part has same CADID and name suffix:
+		childName = get_Assembly_Name(assem, label)
+		if childName:
+			ret.append(childName) #Must be assembly like "KP0093__1_"
+		else:
+			ret = ["", ret[0]] #Must be assembly like "NEMA17_48H__1_" with generic parts.
+	elif ret[0][0]=="K" and len(ret[0])==6:
+		#return [ret[0], ""] #Must be part name like "KP0093-01_ToolInterface"
+		#print("foo")
+		ret = [ret[0], ret[1]]
+	else:
+		#return ["", ret[0]] #Must be a part name like "M3-Nut_90391A250_ZINC PLATED STEEL HEX NUT002"
+		ret = ["", ret[0]]
+	#print("   ret: [" + ret[0] + "," + ret[1] + "]")
+	return ret
+
+#Get name of unnamed assembly, it has same name as child part with same ID
+def get_Assembly_Name(assem, label):
+	for i in range(0,len(assem.Group)):
+		child = assem.Group[i]
+		childInfo = get_CADID_Name(child, child.Label)
+		#print("childInfo and trimmed label:")
+		#print(childInfo)
+		#print(label[:-4])
+		if childInfo[0]==label[:-4]:
+			return childInfo[1]
+
+#Parent call must have made node already
+#Adds all children as nodes, unless they're multiples, then it only adds 1 node with quantity
+def traverseNode(node, depth):
+	depth = depth + 1
+	for i in range(0,len(node.assem.Group)):
+		#if depth == 0 and i > 2 or depth > 3: return
+		childAssem = node.assem.Group[i]
+		#print(" Outer")
+		nodeInfo = get_CADID_Name(childAssem, childAssem.Label)
+		#check if generic part name, not important "Part 002" or "Part 16":
+		if nodeInfo[1][:4]=="Part" and (len(nodeInfo[1])==7 and nodeInfo[1][5:7].isdigit() or len(nodeInfo[1])==8 and nodeInfo[1][5:8].isdigit()):
+			continue #Skip generic part, it isn't important, it's a sub-part of a bearing or hose-clamp
+		#Check in there are multiples e.g. bearing, bearing001, bearing002, bearing003
+		isFirst = True
+		removeSuffixNumber = False #e.g. if bearing020, bearing021, bearing022, we want to remove ###
+		quantity = 1
+		#if nodeInfo[1][-3:].isdigit():
+		#	nonfirstQuantity = nonfirstQuantity + 1
+		for j in range(0,len(node.assem.Group)):
+			if i == j:
+				continue
+			check = node.assem.Group[j]
+			#print(" Inner")
+			checkInfo = get_CADID_Name(check, check.Label)
+			#print("checkInfo[1][-3:]:" + checkInfo[1][-3:] + " checkInfo[1][:-3]:" + checkInfo[1][:-3] + " nodeInfo[1]:" + nodeInfo[1])
+			#Check if node is substr of check, e.g. node="ToolShaft" and check="ToolShaft001"
+			if checkInfo[1][-3:].isdigit() and (checkInfo[1][:-3]==nodeInfo[1]):
+				quantity = quantity + 1
+				#print("q=q+1")
+			#Check if check is substr of node, e.g. node="ToolShaft001" and check="ToolShaft"
+			elif nodeInfo[1][-3:].isdigit() and (nodeInfo[1][:-3]==checkInfo[1]):
+				isFirst = False
+				#print(" not first")
+				break
+			# Now check if we have an offset, e.g. bearing020, bearing021, bearing022
+			elif nodeInfo[1][-3:].isdigit() and checkInfo[1][-3:].isdigit() and nodeInfo[1][:-3]==checkInfo[1][:-3]:
+				if nodeInfo[1][-3:] > checkInfo[1][-3:]:
+					#022 is larger than #020, so skip this node, only put a quantity on #020
+					isFirst = False
+					break
+				quantity = quantity + 1
+				removeSuffixNumber = True
+			#print(checkInfo[1][-3:] + " : " + nodeInfo[1][:-3] + " : " + checkInfo[1])
+		if isFirst:
+			child = Node(nodeInfo[0], nodeInfo[1], node, childAssem)
+			child.quantity = quantity
+			if removeSuffixNumber and nodeInfo[1][-3:].isdigit(): #remove ###, last check is sanity check
+				child.name = child.name[:-3]
+			node.children.append(child)
+			print("ID:" + child.id + " Name:" + child.name + " Depth:" + `depth` + " Quantity: " + `quantity`)
+			if hasattr(child.assem, "Group"):
+				traverseNode(child, depth)
+	return node
+
+def writeTreeToCSV(f, node, depth):
+	spacer = ""
+	for i in range(0, depth-1):
+		spacer = spacer + " "
+	if depth > 0:
+		if depth % 2 == 1:
+			spacer = spacer + "-"
+		else:
+			spacer = spacer + " "
+	f.write('"' + node.id + '","' + spacer + node.name + '","' + `node.quantity` + '"\n')
+	#print("NumChildren:" + `len(node.children)`)
+	for i in range(0, len(node.children)):
+		child = node.children[i]
+		writeTreeToCSV(f, child, depth+1)
+
+doc = App.activeDocument()
+#Traverse Tree:
+assem1 = doc.Assem1
+rootNode = Node("Assem1", "root", None, assem1)
+traverseNode(rootNode, -1)
+#Output Tree:
+f = open("/tmp/pbs_hierarchy.csv","w")
+writeTreeToCSV(f, rootNode, -1)
+f.close()
