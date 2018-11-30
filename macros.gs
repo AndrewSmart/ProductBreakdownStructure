@@ -87,25 +87,40 @@ function populate_tabs() {
     //  sht.deleteRow(3);
     sht.getRange(3, 1, sht.getMaxRows()-2, sht.getMaxColumns()).sort([3,6]);
   });
-  group_sheet(printsSheet,1,false);
-  //group_sheet(printsSheet,2,false);
-  group_sheet(hardwareSheet,1,false); //Must first group by CAD ID, then name
-  group_sheet(hardwareSheet,2,true);
+  group_sheet(printsSheet);
+  group_sheet(hardwareSheet);
 };
 
 /** Function assumes sheet already sorted by matchColumn.*/
-function group_sheet(sht,matchColumn,groupEmptyCADIDOnly) {
+function group_sheet(sht) {
   var pbsNames = sht.getRange(3, 1, sht.getMaxRows()-2, sht.getMaxColumns()).getValues();
   // Search from the bottom, so that we don't have to deal with indicies into the sheet changing.
   for(var i = pbsNames.length - 1; i > 0; --i) {
     var j = i - 1;
     var quantity = pbsNames[i][3] > 1 ? pbsNames[i][3] : 1;
-    if(pbsNames[i][matchColumn] === "")
-      continue; //Skip blank entries... screws up counting/matching.
-    if(groupEmptyCADIDOnly && pbsNames[i][1] != "")
-      continue; //Workaround for hardware tab & hardware not having CAD IDs, want to group hardware together.
+    //Regex unreliable, so using for loop to find # suffix.
+    var k = pbsNames[i][2].length - 1;
+    for(; k >= 0; --k) {
+      var ch = pbsNames[i][2].charAt(k);
+      if(ch < "0" || ch > "9")
+        break;
+    }
+    outerBase = pbsNames[i][2].substring(0, k+1);
+    //log.setValue(log.getValue() + " oB:" + outerBase);
     for(; j >= 0; --j) { // Search for matches above i, keep looping until difference
-      if(pbsNames[i][matchColumn] != pbsNames[j][matchColumn]) {
+      if(pbsNames[i][1] != pbsNames[j][1]) { //Check if CAD IDs not the same first
+        j++; //increment j for the mismatch
+        break;
+      }
+      var k = pbsNames[j][2].length - 1;
+      for(; k >= 0; --k) {
+        var ch = pbsNames[j][2].charAt(k);
+        if(ch < "0" || ch > "9")
+          break;
+      }
+      innerBase = pbsNames[j][2].substring(0, k+1);
+      //log.setValue(log.getValue() + " iB:" + innerBase + '\n');
+      if(innerBase != outerBase) {
         j++; //increment j for the mismatch.
         break;
       }
@@ -280,7 +295,7 @@ function populate_tabs_from_pbsTree(pNode, runningQuantity, pbsData) {
       //var log = pbsSheet.getRange(3, 1);
       //log.setValue(log.getValue() + " q:" + quantity);
       var buildType = pbsData[iChild][5].toString();
-      var pbsHyperlink = "=HYPERLINK(\"#gid=0&range=A" + (iChild+1) + "\",\"" + pbsData[iChild][0] + "\")";
+      var pbsHyperlink = "=HYPERLINK(\"#gid=0&range=A" + (iChild+3) + "\",\"" + pbsData[iChild][0] + "\")";
       if(buildType === "3 - 3D PRINT") {
         printsSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
       } else if(buildType === "O - OFF THE SHELF") {
