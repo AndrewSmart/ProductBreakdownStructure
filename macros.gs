@@ -48,11 +48,12 @@
 function populate_tabs() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var pbsSheet = ss.getSheetByName('PBS');
-  var printsSheet = ss.getSheetByName('3D Prints');
-  var hardwareSheet = ss.getSheetByName('Hardware');
-  var carbonFiberSheet = ss.getSheetByName('CarbonFiber');
+  var printsSheet = ss.getSheetByName('BOM-3D Prints');
+  var hardwareSheet = ss.getSheetByName('BOM-Hardware');
+  var carbonFiberSheet = ss.getSheetByName('BOM-CarbonFiber');
   //var pbsData = pbsSheet.getDataRange().getValues();
   var autoPopulatedSheets = [printsSheet, hardwareSheet, carbonFiberSheet];
+  //var log = pbsSheet.getRange(3, 1); log.setValue(log.getValue() + " Hi");
 
   // Clear the autopopulated sheet; delete all but first data row, so style not lost
   autoPopulatedSheets.forEach(function(sht) {
@@ -278,33 +279,40 @@ function write_pbsnumber_to_sheet(pbsSheet, pNode) {
   }
 };
 
-/* Populate tabs from PBS Tree.*/
+/* Populate tabs from PBS Tree.
+ * @pNode pointer into the tree data structure
+ * @runningQuantity
+ * @pbsData contains the PBS tab data minus the header rows, reduces sheet API calls using it
+ */
 function populate_tabs_from_pbsTree(pNode, runningQuantity, pbsData) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var pbsSheet = ss.getSheetByName('PBS');
-  var printsSheet = ss.getSheetByName('3D Prints');
-  var hardwareSheet = ss.getSheetByName('Hardware');
-  var carbonFiberSheet = ss.getSheetByName('CarbonFiber');
+  var printsSheet = ss.getSheetByName('BOM-3D Prints');
+  var hardwareSheet = ss.getSheetByName('BOM-Hardware');
+  var carbonFiberSheet = ss.getSheetByName('BOM-CarbonFiber');
   for(var j = 0; j < pNode.child.length; ++j) {
     var pChild = pNode.child[j];
     var iChild = pChild.data;
     var quantity = pbsData[iChild][6] > 1 ? pbsData[iChild][6] : 1;
+    var isDeprecated = pbsData[iChild][7] === "X - DEPRECATED";
     quantity = runningQuantity * quantity;
-    if(0 == pChild.child.length) { //leaf node
-      // Find parent assembly quantities, and multiply each.
-      //var log = pbsSheet.getRange(3, 1);
-      //log.setValue(log.getValue() + " q:" + quantity);
-      var buildType = pbsData[iChild][5].toString();
-      var pbsHyperlink = "=HYPERLINK(\"#gid=0&range=A" + (iChild+3) + "\",\"" + pbsData[iChild][0] + "\")";
-      if(buildType === "3 - 3D PRINT") {
-        printsSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
-      } else if(buildType === "O - OFF THE SHELF") {
-        hardwareSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
-      } else if(buildType === "C - CARBON FIBER") {
-        carbonFiberSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
+    if(!isDeprecated) {
+      if(0 == pChild.child.length) { //leaf node
+        // Find parent assembly quantities, and multiply each.
+        //var log = pbsSheet.getRange(3, 1);
+        //log.setValue(log.getValue() + " q:" + quantity);
+        var buildType = pbsData[iChild][5].toString();
+        var pbsHyperlink = "=HYPERLINK(\"#gid=0&range=A" + (iChild+3) + "\",\"" + pbsData[iChild][0] + "\")";
+        if(buildType === "3 - 3D PRINT") {
+          printsSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
+        } else if(buildType === "O - OFF THE SHELF") {
+          hardwareSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
+        } else if(buildType === "C - CARBON FIBER") {
+          carbonFiberSheet.appendRow([pbsHyperlink, pbsData[iChild][1], pbsData[iChild][2].toString().replace(/^[- ]+/,''), quantity, pbsData[iChild][7], pbsData[iChild][9]]);
+        }
+      } else {//Has children:
+        populate_tabs_from_pbsTree(pChild, quantity, pbsData); //Handle children
       }
-    } else {//Has children:
-      populate_tabs_from_pbsTree(pChild, quantity, pbsData); //Handle children
     }
   }
 };
